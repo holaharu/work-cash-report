@@ -1,4 +1,4 @@
-import {historyForPeriod} from './print-report.js?v=20261002-7';
+import {historyForPeriod} from './print-report.js?v=20261002-8';
 import {inspectWorkbook,readWorkbookSheet} from '../excel.js?v=20261002-5';
 export {inspectWorkbook};
 const compact=v=>String(v??'').replace(/\s/g,'');
@@ -84,6 +84,33 @@ function attachTransactions(rows,transactions,warnings){
 }
 function columnNumber(s){return[...s].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0);}
 function colName(n){let s='';while(n){n--;s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26);}return s;}
+// The workbook has a separate three-year total series in millions of won.
+export function parseThreeYearTotals(sheet,end){
+ const v=sheet.value;
+ const ref=[...sheet.cells.keys()].find(ref=>/^C\d+$/.test(ref)&&/^총합.*백만/.test(compact(v(ref))));
+ if(!ref)return [];
+ const row=+ref.slice(1),dateRow=row-1;
+ const columns=[...sheet.cells.keys()].filter(ref=>+ref.match(/\d+$/)[0]===row&&columnNumber(ref.replace(/\d+$/,''))>=4&&num(v(ref))!==null).map(ref=>ref.replace(/\d+$/,'')).sort((a,b)=>columnNumber(a)-columnNumber(b));
+ let month=null;
+ const points=columns.map(col=>{
+  const raw=v(col+dateRow),label=String(raw??'').trim();let parts=null;
+  if(typeof raw==='number'&&raw>30000&&raw<100000){const date=dateFromSerial(raw);parts={year:+date.slice(0,4),month:+date.slice(5,7),day:+date.slice(8)};month=parts.month;}
+  else {const full=label.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/),md=label.match(/(\d{1,2})\s*[월/.-]\s*(\d{1,2})/),d=label.match(/^(\d{1,2})일?$/);
+   if(full){parts={year:+full[1],month:+full[2],day:+full[3]};month=parts.month;}
+   else if(md){parts={month:+md[1],day:+md[2]};month=parts.month;}
+   else if(d&&month)parts={month,day:+d[1]};
+  }
+  return {parts,label,assets:num(v(col+row))*1e6,source:sheet.name+'!'+col+row};
+ });
+ let year=+end.slice(0,4),nextMonth=+end.slice(5,7),nextDay=+end.slice(8);
+ for(let i=points.length-1;i>=0;i--){const p=points[i],d=p.parts;if(!d)continue;
+  if(d.year)year=d.year;else if(d.month-nextMonth>=6)year--;
+  p.date=String(year)+'-'+String(d.month).padStart(2,'0')+'-'+String(d.day).padStart(2,'0');nextMonth=d.month;nextDay=d.day;
+ }
+ let anchorDate=null;
+ for(const p of points){p.exactDate=Boolean(p.date);if(p.date)anchorDate=p.date;else p.date=anchorDate;delete p.parts;}
+ return historyForPeriod(points.filter(p=>p.date),end,3);
+}
 export async function graphHistory(model,name,report,summary,warnings){
  const history=[];if(name){const sh=await readWorkbookSheet(model,name),v=sh.value;
   const labels=new Map([...sh.cells.keys()].filter(x=>/^C\d+$/.test(x)).map(ref=>[compact(v(ref)),+ref.slice(1)]));
@@ -120,8 +147,9 @@ export async function buildReport(model,source,{dailySheet='',graphSheet='',file
  const summary=[45,46,47,48].map((r,i)=>({key:categories[i],label:['현금','외화','주식','자산 총계'][i],previous:number(v(`E${r}`)),current:number(v(`F${r}`)),change:number(v(`G${r}`))}));
  const subtotal=[24,25,26,30,31].map(r=>({label:r===24?'원화 소계':r===25?'유로 소계':r===26?'파운드 소계':r===30?'외화 합계 (원화 환산)':'현금·외화 합계',previous:number(v(`E${r}`)),in:r<=26?number(v(`F${r}`)):null,out:r<=26?number(v(`G${r}`)):null,current:number(v(`H${r}`)),currency:r===25?'EUR':r===26?'GBP':'KRW',key:r===24?'cash':r===30?'foreign':r===31?'cashForeign':null}));
  const history=await graphHistory(model,graphSheet,source,summary,warnings);
+ const totalHistory=graphSheet?parseThreeYearTotals(await readWorkbookSheet(model,graphSheet),source.end):[];
  if(Math.abs(summary[0].current+summary[1].current+summary[2].current-summary[3].current)>1)throw Error('자금 총액비교 현황의 구성금액과 자산 총계가 일치하지 않습니다.');
- return {version:1,title:'주간 자금현황',company:'모비스',sheet:source.name,start:source.start,end:source.end,updatedAt:new Date().toISOString(),source:{weekly:source.name,daily:dailySheet,graph:graphSheet,fileName},rows,subtotal,stocks,stockTotal:{previous:number(v('F39')),current:number(v('G39')),change:number(v('H39'))},summary,history,dailyLedger,warnings:[...new Set(warnings)],privacy:'계좌번호는 끝 4자리만 표시합니다. 일일내역의 거래처와 내용은 원문대로 표시합니다.'};
+ return {version:1,title:'주간 자금현황',company:'모비스',sheet:source.name,start:source.start,end:source.end,updatedAt:new Date().toISOString(),source:{weekly:source.name,daily:dailySheet,graph:graphSheet,fileName},rows,subtotal,stocks,stockTotal:{previous:number(v('F39')),current:number(v('G39')),change:number(v('H39'))},summary,history,totalHistory,dailyLedger,warnings:[...new Set(warnings)],privacy:'계좌번호는 끝 4자리만 표시합니다. 일일내역의 거래처와 내용은 원문대로 표시합니다.'};
 }
 export function validateReport(report){
  if(report?.version!==1||!Array.isArray(report.rows)||report.rows.length!==18||!Array.isArray(report.summary)||report.summary.length!==4||!Array.isArray(report.history))throw Error('게시 파일 형식이 올바르지 않습니다. 갱신 화면에서 다시 생성하세요.');

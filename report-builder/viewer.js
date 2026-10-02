@@ -1,4 +1,4 @@
-import {installReportPrint,historyForPeriod} from './print-report.js?v=20261002-7';
+import {installReportPrint,historyForPeriod} from './print-report.js?v=20261002-8';
 const escapeText=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nf=new Intl.NumberFormat('ko-KR',{maximumFractionDigits:0});
 const decimal=new Intl.NumberFormat('ko-KR',{maximumFractionDigits:2});
