@@ -1,3 +1,4 @@
+import {historyForPeriod} from './print-report.js?v=20261002-6';
 import {inspectWorkbook,readWorkbookSheet} from '../excel.js?v=20261002-5';
 export {inspectWorkbook};
 const compact=v=>String(v??'').replace(/\s/g,'');
@@ -107,7 +108,7 @@ export async function graphHistory(model,name,report,summary,warnings){
  if(!history.some(p=>p.date===previousDate))history.push({date:previousDate,...Object.fromEntries(summary.map(s=>[s.key,s.previous])),source:`${report.name}!E45:E48`});
  const current={date:report.end,...Object.fromEntries(summary.map(s=>[s.key,s.current])),source:`${report.name}!F45:F48`};
  const i=history.findIndex(p=>p.date===report.end);if(i>=0)history[i]=current;else history.push(current);
- return history.sort((a,b)=>a.date.localeCompare(b.date)).slice(-24);
+ return historyForPeriod(history,report.end,3);
 }
 export async function buildReport(model,source,{dailySheet='',graphSheet='',fileName=''}={}){
  const v=source.value,warnings=[];
@@ -129,3 +130,4 @@ export function validateReport(report){
  for(const s of report.summary)for(const k of ['previous','current','change'])if(num(s[k])===null)throw Error('총계 금액이 올바르지 않습니다.');
  return report;
 }
+
