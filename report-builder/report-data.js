@@ -6,6 +6,7 @@ const number=(v,fallback=0)=>num(v)??fallback;
 const dateFromSerial=v=>new Date(Date.UTC(1899,11,30)+Math.round(v)*86400000).toISOString().slice(0,10);
 const bank=v=>compact(v).replace(/\(.*?\)/g,'');
 const money=(v,currency='KRW')=>new Intl.NumberFormat('ko-KR',{maximumFractionDigits:currency==='KRW'?0:2}).format(v)+(currency==='KRW'?'원':currency==='EUR'?'유로':'파운드');
+const rate=v=>new Intl.NumberFormat('ko-KR',{maximumFractionDigits:2}).format(v)+'원';
 const accountMask=v=>{const digits=String(v??'').replace(/\D/g,'');return digits?'•••• '+digits.slice(-4):'—';};
 const categories=['cash','foreign','stocks','assets'];
 function dateRange(value,year){
@@ -95,7 +96,7 @@ export async function graphHistory(model,name,report,summary,warnings){
 export async function buildReport(model,source,{dailySheet='',graphSheet='',fileName=''}={}){
  const v=source.value,warnings=[];
  if(!source.ready)throw Error('선택한 주간 시트의 금주 금액이 미완성입니다. Excel에서 금액을 입력하고 저장하세요.');
- const rows=[];for(let r=6;r<=23;r++)rows.push({id:`account-${r}`,bank:String(v(`B${r}`)??''),type:String(v(`C${r}`)??''),account:accountMask(v(`D${r}`)),previous:number(v(`E${r}`)),in:number(v(`F${r}`)),out:number(v(`G${r}`)),current:number(v(`H${r}`)),note:r===19?`EUR ${money(number(v('I19')))}`:r===20?`GBP ${money(number(v('I20')))}`:String(v(`I${r}`)??''),currency:r===10||r===19?'EUR':r===20?'GBP':'KRW'});
+ const rows=[];for(let r=6;r<=23;r++)rows.push({id:`account-${r}`,bank:String(v(`B${r}`)??''),type:String(v(`C${r}`)??''),account:accountMask(v(`D${r}`)),previous:number(v(`E${r}`)),in:number(v(`F${r}`)),out:number(v(`G${r}`)),current:number(v(`H${r}`)),note:r===19?`EUR ${rate(number(v('I19')))}`:r===20?`GBP ${rate(number(v('I20')))}`:String(v(`I${r}`)??''),currency:r===10||r===19?'EUR':r===20?'GBP':'KRW'});
  const transactions=await dailyTransactions(model,dailySheet,source);attachTransactions(rows,transactions,warnings);
  if(!transactions.length)warnings.push('보고기간에 해당하는 일일 거래내역이 없습니다. 일일 시트와 날짜를 확인하세요.');
  const stocks=[];for(let r=35;r<=38;r++)stocks.push({name:String(v(`B${r}`)??''),broker:String(v(`C${r}`)??''),quantity:num(v(`D${r}`)),price:num(v(`E${r}`)),previous:number(v(`F${r}`)),current:number(v(`G${r}`)),change:number(v(`H${r}`)),note:String(v(`I${r}`)??'')});
