@@ -1,4 +1,4 @@
-import {historyForPeriod} from './print-report.js?v=20261002-6';
+import {historyForPeriod} from './print-report.js?v=20261002-7';
 import {inspectWorkbook,readWorkbookSheet} from '../excel.js?v=20261002-5';
 export {inspectWorkbook};
 const compact=v=>String(v??'').replace(/\s/g,'');
@@ -78,7 +78,7 @@ function attachTransactions(rows,transactions,warnings){
   const active=rows.filter(r=>r.currency===row.currency&&(row.currency!=='KRW'||bank(r.bank)===bank(row.bank))&&r[direction]>0);
   const sum=pool.reduce((s,t)=>s+t.amount,0),matched=active.length===1&&Math.abs(sum-amount)<.02;
   const top=pool.sort((a,b)=>b.amount-a.amount).slice(0,3);
-  row.details??={};row.details[direction]={message:matched?narrative(top,direction):pool.length?'은행별 주요 거래입니다. 일일내역에 계좌 구분이 없어 이 계좌의 거래로 확정할 수 없습니다.':'이 금액에 연결되는 일일내역을 찾지 못했습니다.',matched,total:sum,scope:matched?'주간 금액과 일일내역 합계 일치':pool.length?'은행별 참고내역 · 계좌 미확정':'일일내역 미연결',items:top.map(t=>({label:transactionLabel(t),amount:t.amount,date:t.dateLabel,source:t.source})),count:pool.length};
+  row.details??={};row.details[direction]={message:pool.length?(matched?'':'은행별 주요 거래: ')+narrative(top,direction):'해당 기간의 주요 거래내역이 없습니다.',matched,total:sum,scope:matched?'주간 금액과 일일내역 합계 일치':pool.length?'은행별 주요 거래':'일일내역 미연결',items:top.map(t=>({label:transactionLabel(t),amount:t.amount,date:t.dateLabel,source:t.source})),count:pool.length};
   if(!matched)warnings.push(`${row.bank} ${row.type} ${direction==='in'?'입금':'출금'}: 일일내역과 계좌 연결을 확인하세요.`);
  }
 }
