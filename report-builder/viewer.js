@@ -1,4 +1,4 @@
-import {installReportPrint} from './print-report.js?v=20261002-3';
+import {installReportPrint} from './print-report.js?v=20261002-4';
 const escapeText=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nf=new Intl.NumberFormat('ko-KR',{maximumFractionDigits:0});
 const decimal=new Intl.NumberFormat('ko-KR',{maximumFractionDigits:2});
