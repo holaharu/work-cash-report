@@ -1,4 +1,4 @@
-import {inspectWorkbook,buildReport,validateReport} from './report-data.js';
+import {inspectWorkbook,buildReport,validateReport} from './report-data.js?v=20261002-2';
 import {renderReport} from './viewer.js';
 const $=id=>document.getElementById(id);
 let model=null,fileName='',report=null,resultURL=null,siteHTML='',cleanup=null,busy=false,loadId=0;
