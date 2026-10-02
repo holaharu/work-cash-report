@@ -1,5 +1,5 @@
 import {inspectWorkbook,buildReport,validateReport} from './report-data.js?v=20261002-8';
-import {renderReport} from './viewer.js?v=20261002-8';
+import {renderReport} from './viewer.js?v=20261002-9';
 const $=id=>document.getElementById(id);
 let model=null,fileName='',report=null,resultURL=null,siteHTML='',cleanup=null,busy=false,loadId=0;
 const controls=['weekly','daily','graph'];
@@ -17,7 +17,7 @@ $('workbook').addEventListener('change',event=>loadFile(event.target.files[0]));
 const zone=$('drop-zone');for(const type of ['dragenter','dragover'])zone.addEventListener(type,event=>{event.preventDefault();zone.classList.add('dragging');});for(const type of ['dragleave','drop'])zone.addEventListener(type,event=>{event.preventDefault();zone.classList.remove('dragging');});zone.addEventListener('drop',event=>{const files=event.dataTransfer.files;if(files.length!==1){status('엑셀 파일 한 개를 선택하세요.','error');return;}loadFile(files[0]);});
 $('weekly').addEventListener('change',()=>{clearResult();syncSources();status('선택한 보고기간의 일일내역과 그래프를 확인하세요.');});for(const key of ['daily','graph'])$(key).addEventListener('change',()=>{clearResult();status('시트 선택이 바뀌었습니다. 보고서 사이트를 다시 생성하세요.');});
 let templatePromise=null;
-async function makeSite(data){templatePromise??=Promise.all(['viewer.css','viewer.js?v=20261002-8','print-report.css?v=20261002-8','print-report.js?v=20261002-8'].map(async path=>{const response=await fetch(new URL(path,import.meta.url));if(!response.ok)throw Error('보고서 양식을 불러오지 못했습니다. 새로고침하세요.');return response.text();}));const[viewerCSS,viewer,printCSS,printJS]=await templatePromise;const css=viewerCSS+"\n"+printCSS;
+async function makeSite(data){templatePromise??=Promise.all(['viewer.css','viewer.js?v=20261002-9','print-report.css?v=20261002-8','print-report.js?v=20261002-8'].map(async path=>{const response=await fetch(new URL(path,import.meta.url));if(!response.ok)throw Error('보고서 양식을 불러오지 못했습니다. 새로고침하세요.');return response.text();}));const[viewerCSS,viewer,printCSS,printJS]=await templatePromise;const css=viewerCSS+"\n"+printCSS;
  const json=JSON.stringify(data).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
  const code=printJS.replace(/^export /gm,'')+'\n'+viewer.replace(/^import .*?;\s*/gm,'').replace(/^export /gm,'');
  return`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><title>모비스 주간자금현황 ${data.end}</title><style>${css}\nbody{padding:30px 22px}@media(max-width:650px){body{padding:12px 8px}}@media print{body{padding:0}}</style></head><body><main id="report"></main><script>\n(()=>{\n${code}\nconst reportData=${json};\nrenderReport(document.getElementById('report'),reportData);\n})();\n<\/script></body></html>`;
