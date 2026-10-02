@@ -3,6 +3,22 @@ const pNumber=(v,decimals=0)=>Number.isFinite(v)?v.toLocaleString('ko-KR',{maxim
 const pChange=v=>!v?'-':v<0?`(${pNumber(-v)})`:`+${pNumber(v)}`;
 const pPercent=(a,b)=>b?`${(100*(a-b)/b).toFixed(2)}%`:'-';
 const pClass=v=>v<0?'p-negative':v>0?'p-positive':'';
+export function renderDailyLedger(ledger){
+ if(!ledger?.days?.length)return `<p class="p-daily-empty">${ledger?.sheet?'보고기간에 해당하는 일일내역이 없습니다.':'일일내역 미연결'}</p>`;
+ return ledger.days.map(day=>{
+  const columns=day.columns,count=columns.length+3;
+  const date=day.start===day.end?day.start.replaceAll('-','.'):day.start.replaceAll('-','.')+' ~ '+day.end.replaceAll('-','.');
+  const cells=(values,direction='')=>columns.map(h=>{const n=values?.[h.col],color=n?(direction==='out'?'p-negative':direction==='in'?'p-positive':direction==='net'?pClass(n):''):'';return `<td class="p-daily-amount ${h.total?'p-daily-total':''} ${color}">${n===null||n===undefined?'—':pNumber(n,h.currency==='KRW'?0:2)}</td>`;}).join('');
+  const groups=['in','out'].map(direction=>{
+   const entries=day.entries[direction],label=direction==='in'?'입금':'출금';
+   const rows=entries.length?entries.map(entry=>`<tr class="p-daily-entry" data-source="${pEscape(entry.source)}"><th class="p-daily-direction p-daily-${direction}">${label}</th><td class="p-daily-party">${pEscape(entry.counterparty)||'—'}</td><td class="p-daily-description">${pEscape(entry.description)||'—'}</td>${cells(entry.amounts,direction)}</tr>`).join(''):`<tr class="p-daily-empty-row"><th class="p-daily-direction p-daily-${direction}">${label}</th><td colspan="${count-1}">자금내역없음</td></tr>`;
+   const total=day.summaries[direction==='in'?'income':'outcome'];
+   return rows+(entries.length&&total?`<tr class="p-subtotal"><th colspan="3">${label} 소계</th>${cells(total.amounts,direction)}</tr>`:'');
+  }).join('');
+  const balances=['net','opening','closing'].map(key=>{const s=day.summaries[key];return s?`<tr class="${key==='closing'?'p-daily-closing':'p-daily-balance'}"><th colspan="3">${key==='net'?'입출금 차액':pEscape(s.label)}</th>${cells(s.amounts,key==='net'?'net':'')}</tr>`:'';}).join('');
+  return `<section class="p-daily-day"><table class="p-table p-daily-table"><colgroup><col class="p-col-direction"><col class="p-col-party"><col class="p-col-description">${columns.map(()=>'<col>').join('')}</colgroup><thead><tr class="p-daily-date"><th colspan="${count}">${pEscape(date)}</th></tr><tr><th>구분</th><th>거래처</th><th>내용</th>${columns.map(h=>`<th>${pEscape(h.label)}${h.currency==='KRW'?'':`<small>${h.currency}</small>`}</th>`).join('')}</tr></thead><tbody>${groups}${balances}</tbody></table></section>`;
+ }).join('');
+}
 function pLine(points,{key='assets',label='',width=650,height=300,color='#28598f',spark=false,unit=1e8}={}){
  const data=points.map(p=>({date:p.date,value:key==='cashForeign'?p.cash+p.foreign:p[key]})).filter(p=>Number.isFinite(p.value));
  if(data.length<2)return'<p class="p-empty">추이 자료 없음</p>';
@@ -32,7 +48,7 @@ export function makePrintPages(report){
  const rows=[['보통예금',a],['단기금융상품',b],['원화 현금 및 예금',sums.cash,'subtotal'],['외화예금 (원화환산)',sums.foreign],['주식 평가액',{previous:stockPrevious,current:stockCurrent}],['증권 예수금',total(deposit)],['주식 및 증권계좌',sums.stocks,'subtotal'],['자산 총계',sums.assets,'grand']];
  const dateText=s=>{const d=new Date(s+'T00:00:00Z');return s.replaceAll('-','.')+' ('+['일','월','화','수','목','금','토'][d.getUTCDay()]+')';};
  const header=(subtitle='')=>`<header class="p-header"><div><p class="p-eyebrow">TREASURY REPORT</p><h1>주간 자금현황${subtitle?` <span>${subtitle}</span>`:''}</h1><p class="p-period">${dateText(report.start)} ~ ${dateText(report.end)}</p></div><table class="p-approval"><tr><th rowspan="2">결<br>재</th><th>담당</th><th>검토</th><th>승인</th></tr><tr><td></td><td></td><td></td></tr></table></header>`;
- const footer=page=>`<footer class="p-footer"><span>단위: 원 (외화예금은 해당 통화, 원화환산은 적용환율 기준)</span><span>작성 ${new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date(report.updatedAt))} · ${page} / 3</span></footer>`;
+ const footer=page=>`<footer class="p-footer"><span>단위: 원 (외화예금은 해당 통화, 원화환산은 적용환율 기준)</span><span>작성 ${new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul'}).format(new Date(report.updatedAt))} · ${page}</span></footer>`;
  const metrics=[['assets','총 자산 (원화·외화·주식)'],['cash','원화 현금 및 예금'],['foreign','외화예금 (원화환산)'],['stocks','주식 및 증권계좌']];
  const highlights=[...report.rows.filter(r=>r.currency==='KRW').map(r=>({label:r.bank+' '+r.type,change:r.current-r.previous})),...stocks.map(s=>({label:s.name+' 평가액',change:s.change}))].filter(x=>x.change).sort((x,y)=>Math.abs(y.change)-Math.abs(x.change)).slice(0,5);
  const tableHead='<thead><tr><th>구분</th><th>이전주</th><th>금주</th><th>차액</th><th>증감률</th></tr></thead>';
@@ -42,14 +58,17 @@ export function makePrintPages(report){
  const page2=`<section class="treasury-page">${header('· 현금·예금 입출금 요약')}<table class="p-table p-accounts"><thead><tr><th>은행</th><th>계좌명</th><th>계좌번호</th><th>주초잔액</th><th>주말잔액</th><th>증감</th><th>비고</th></tr></thead><tbody><tr class="p-group"><th colspan="7">보통예금</th></tr>${accountRows(ordinary)}<tr class="p-group"><th colspan="7">단기금융상품</th></tr>${accountRows(term)}<tr class="p-group"><th colspan="7">외화예금</th></tr>${accountRows(foreign)}${report.subtotal.map(s=>`<tr class="${s.key==='cashForeign'?'p-grand':'p-subtotal'}"><th colspan="3">${pEscape(s.label)}</th><td>${currencyValue(s.previous,s.currency)}</td><td>${currencyValue(s.current,s.currency)}</td><td class="${pClass(s.current-s.previous)}">${currencyValue(s.current-s.previous,s.currency)}</td><td>${s.currency==='KRW'?'원화환산 포함':s.currency}</td></tr>`).join('')}</tbody></table><p class="p-note">입출금 상세 화면은 거래 계좌만 표시하며, 이 보고서의 잔액 및 소계는 전체 계좌를 포함합니다.</p>${footer(2)}</section>`;
  const pdate=new Date(Date.parse(report.start+'T00:00:00Z')-86400000).toISOString().slice(0,10);
  const page3=`<section class="treasury-page">${header('· 주식보유 현황 및 변동')}<table class="p-table p-stocks"><thead><tr><th>종목</th><th>증권사</th><th>보유주식수</th><th>전주 환산주가</th><th>금주 주가</th><th>등락률</th><th>이전주 총액</th><th>금주 총액</th><th>차액</th></tr></thead><tbody>${stocks.map(s=>{const previous=s.previous/s.quantity;return`<tr><th>${pEscape(s.name)}</th><td>${pEscape(s.broker)}</td><td>${pNumber(s.quantity)}</td><td>${pNumber(previous)}</td><td class="p-bold">${pNumber(s.price)}</td><td class="${pClass(s.change)}">${pPercent(s.current,s.previous)}</td><td>${pNumber(s.previous)}</td><td>${pNumber(s.current)}</td><td class="${pClass(s.change)}">${pChange(s.change)}</td></tr>`;}).join('')}<tr class="p-subtotal"><th colspan="6">주식 평가액 소계</th><td>${pNumber(stockPrevious)}</td><td>${pNumber(stockCurrent)}</td><td class="${pClass(stockCurrent-stockPrevious)}">${pChange(stockCurrent-stockPrevious)}</td></tr>${deposit.map(s=>`<tr><th>${pEscape(s.name)} 예수금</th><td colspan="5">증권계좌 예수금</td><td>${pNumber(s.previous)}</td><td>${pNumber(s.current)}</td><td>${pChange(s.change)}</td></tr>`).join('')}<tr class="p-grand"><th colspan="6">주식 및 증권계좌 합계</th><td>${pNumber(sums.stocks.previous)}</td><td>${pNumber(sums.stocks.current)}</td><td>${pChange(sums.stocks.change)}</td></tr></tbody></table><p class="p-note">전주 환산주가 = 이전주 평가금액 ÷ 금주 보유주식수. 과거 종목별 주가 자료는 원본에 포함되어 있지 않습니다.</p><h2>종목별 주가 비교 <small>전주 환산주가·금주 주가 기준</small></h2><div class="p-stock-charts">${stocks.map(s=>`<div class="p-stock-chart"><div><strong>${pEscape(s.name)}</strong><span>${pNumber(s.price)}원 · ${pPercent(s.current,s.previous)}</span></div>${pLine([{date:pdate,price:s.previous/s.quantity},{date:report.end,price:s.price}],{key:'price',label:s.name,width:345,height:135,color:'#cc852c',unit:1})}</div>`).join('')}</div><h2>주간 자산 증감 요인 <small><span class="p-legend-blue">원화 현금·예금</span> <span class="p-legend-teal">외화</span> <span class="p-legend-orange">주식·증권</span></small></h2>${pBars(hist)}${footer(3)}</section>`;
- return page1+page2+page3;
+ const daily=`<section class="treasury-page treasury-daily-page">${header('· 일일자금일보')}<p class="p-daily-units">원화: 원 · 외화: EUR / GBP</p>${renderDailyLedger(report.dailyLedger)}${footer('일일내역')}</section>`;
+ return page1+page2+page3+daily;
 }
 export function installReportPrint(root,report){
  const paper=document.createElement('div');paper.className='treasury-print-root';paper.hidden=true;paper.innerHTML=makePrintPages(report);document.body.append(paper);
- const toolbar=document.createElement('div');toolbar.className='treasury-toolbar';toolbar.innerHTML='<button type="button" class="paper-preview-button">보고서 양식 보기</button><button type="button" class="paper-print-button">PDF / 인쇄</button><span>A4 가로 3쪽 · 결재란 포함</span>';root.prepend(toolbar);
+ const toolbar=document.createElement('div');toolbar.className='treasury-toolbar';toolbar.innerHTML='<button type="button" class="paper-preview-button">보고서 양식 보기</button><button type="button" class="paper-print-button">PDF / 인쇄</button><span>A4 가로 · 주간 요약 + 일일자금일보 · 결재란 포함</span>';root.prepend(toolbar);
  const preview=toolbar.querySelector('.paper-preview-button');
  preview.addEventListener('click',()=>{paper.hidden=!paper.hidden;preview.textContent=paper.hidden?'보고서 양식 보기':'보고서 양식 닫기';if(!paper.hidden)paper.scrollIntoView({behavior:'smooth',block:'start'});});
- const printing=()=>{document.body.classList.add('treasury-printing');window.print();};toolbar.querySelector('.paper-print-button').addEventListener('click',printing);
+ const before=()=>document.body.classList.add('treasury-printing');
+ const printing=()=>{before();window.print();};toolbar.querySelector('.paper-print-button').addEventListener('click',printing);
+ window.addEventListener('beforeprint',before);
  const after=()=>document.body.classList.remove('treasury-printing');window.addEventListener('afterprint',after);
- return()=>{paper.remove();toolbar.remove();after();window.removeEventListener('afterprint',after);};
+ return()=>{paper.remove();toolbar.remove();after();window.removeEventListener('beforeprint',before);window.removeEventListener('afterprint',after);};
 }

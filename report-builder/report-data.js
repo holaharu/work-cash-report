@@ -1,4 +1,4 @@
-import {inspectWorkbook,readWorkbookSheet} from '../excel.js';
+import {inspectWorkbook,readWorkbookSheet} from '../excel.js?v=20261002-5';
 export {inspectWorkbook};
 const compact=v=>String(v??'').replace(/\s/g,'');
 const num=v=>typeof v==='number'&&Number.isFinite(v)?v:null;
@@ -16,27 +16,43 @@ function dateRange(value,year){
  const pad=x=>String(x).padStart(2,'0'),start=`${m[1]}-${pad(m[2])}-${pad(m[3])}`,end=m[6]?`${m[4]||m[1]}-${pad(m[5]||m[2])}-${pad(m[6])}`:start;
  return{start,end};
 }
-export async function dailyTransactions(model,sheetName,report){
- if(!sheetName)return[];
- const sheet=await readWorkbookSheet(model,sheetName),v=sheet.value;
- let dates=null,direction=null,headers=new Map();const result=[];
+export function parseDailyLedger(sheet,report){
+ const v=sheet.value,days=[],merged=new Set(sheet.mergedRanges||[]);
+ let day=null,direction=null;
  const rowNumbers=[...new Set([...sheet.cells.keys()].map(ref=>+ref.match(/\d+$/)[0]))].sort((a,b)=>a-b);
  for(const r of rowNumbers){
-  const dr=dateRange(v(`B${r}`),report.end.slice(0,4));if(dr){dates=dr;direction=null;headers=new Map();continue;}
+  const dr=dateRange(v(`B${r}`),report.end.slice(0,4));if(dr){day={...dr,columns:[],entries:{in:[],out:[]},summaries:{},source:`${sheet.name}!B${r}`};days.push(day);direction=null;continue;}
+  if(!day)continue;
   const label=compact(v(`B${r}`));if(label==='입금'||label==='출금')direction=label==='입금'?'in':'out';
   if(compact(v(`C${r}`))==='내용'){
-   headers=new Map();for(const col of ['E','F','G','H','I','J','M','N']){const text=String(v(`${col}${r}`)??'');if(text)headers.set(col,{bank:bank(text),currency:text.includes('유로')?'EUR':text.includes('파운드')?'GBP':'KRW'});}
+   day.columns=[...sheet.cells.keys()].filter(ref=>+ref.match(/\d+$/)[0]===r&&columnNumber(ref.replace(/\d+$/,''))>=5).map(ref=>({col:ref.replace(/\d+$/,''),label:String(v(ref)??'').trim()})).filter(h=>h.label).sort((a,b)=>columnNumber(a.col)-columnNumber(b.col)).map(h=>({...h,currency:/유로|EUR/i.test(h.label)?'EUR':/파운드|GBP/i.test(h.label)?'GBP':'KRW',total:compact(h.label)==='합계'}));
    continue;
   }
-  if(!dates||!direction||dates.end<report.start||dates.start>report.end)continue;
+  if(!day.columns.length)continue;
   const who=String(v(`C${r}`)??'').trim(),description=String(v(`D${r}`)??'').trim();
-  if(!who&&!description||/소계|합계|잔액/.test(compact(who)))continue;
-  for(const[col,h]of headers){const amount=num(v(`${col}${r}`));if(amount===null||amount===0)continue;
-   result.push({...h,direction,amount:Math.abs(amount),counterparty:who,description,date:dates.end,dateLabel:dates.start===dates.end?dates.end.slice(5):`${dates.start.slice(5)}~${dates.end.slice(5)}`,source:`${sheetName}!${col}${r}`});
-  }
+  const amounts=Object.fromEntries(day.columns.map(h=>[h.col,num(v(`${h.col}${r}`))]));
+  const kind=compact(who);
+  let summary=kind==='소계'?(direction==='in'?'income':'outcome'):kind==='합계'?'net':kind==='전일잔액'?'opening':/^당일잔액/.test(kind)?'closing':null;
+  // In this template C:D is merged for subtotal/balance rows, including a subtotal whose label was left blank.
+  if(!who&&!description&&direction&&merged.has(`C${r}:D${r}`)&&Object.values(amounts).some(n=>n!==null))summary=direction==='in'?'income':'outcome';
+  if(summary){day.summaries[summary]={label:who||'소계',amounts,source:`${sheet.name}!C${r}:N${r}`};continue;}
+  if(!direction||(!who&&!description&&!Object.values(amounts).some(n=>n!==null&&n!==0)))continue;
+  day.entries[direction].push({counterparty:who,description,amounts,source:`${sheet.name}!C${r}:N${r}`,row:r});
  }
+ return{sheet:sheet.name,days:days.filter(d=>d.end>=report.start&&d.start<=report.end)};
+}
+export async function readDailyLedger(model,sheetName,report){
+ return sheetName?parseDailyLedger(await readWorkbookSheet(model,sheetName),report):{sheet:'',days:[]};
+}
+export function ledgerTransactions(ledger){
+ const result=[];
+ for(const day of ledger.days)for(const direction of ['in','out'])for(const entry of day.entries[direction])for(const h of day.columns){
+  if(h.total)continue;const amount=entry.amounts[h.col];if(amount===null||amount===0)continue;
+  result.push({bank:bank(h.label),currency:h.currency,direction,amount:Math.abs(amount),counterparty:entry.counterparty,description:entry.description,date:day.end,dateLabel:day.start===day.end?day.end.slice(5):`${day.start.slice(5)}~${day.end.slice(5)}`,source:`${ledger.sheet}!${h.col}${entry.row}`});
+  }
  return result;
 }
+export async function dailyTransactions(model,sheetName,report){return ledgerTransactions(await readDailyLedger(model,sheetName,report));}
 function transactionLabel(t){
  // Only customer/company names from sales receipts are published. Individual payee names stay in the workbook.
  if(t.direction==='in'&&/매출|대금입금|대금 입금/.test(t.description))return `${t.counterparty} · ${t.description}`;
@@ -72,7 +88,7 @@ export async function graphHistory(model,name,report,summary,warnings){
   const labels=new Map([...sh.cells.keys()].filter(x=>/^C\d+$/.test(x)).map(ref=>[compact(v(ref)),+ref.slice(1)]));
   const foreign=labels.get('외화'),stocks=labels.get('주식'),cash=labels.get('원화'),assets=labels.get('총계');
   if(foreign&&stocks&&cash&&assets){
-   const dateRow=foreign-6,max=Math.max(...[...sh.cells.keys()].filter(x=>new RegExp(`^[A-Z]+${dateRow}$`).test(x)).map(x=>columnNumber(x.replace(/\d+$/,''))));
+   const dateLabel=labels.get('날짜'),dateRow=dateLabel&&dateLabel<foreign?dateLabel:foreign-6,max=Math.max(...[...sh.cells.keys()].filter(x=>new RegExp(`^[A-Z]+${dateRow}$`).test(x)).map(x=>columnNumber(x.replace(/\d+$/,''))));
    const seen=new Set();let duplicate=0,mismatch=0;
    for(let c=4;c<=max;c++){const col=colName(c),date=num(v(`${col}${dateRow}`));if(date===null||date<30000||date>100000)continue;
     const d=dateFromSerial(date);if(d>report.end)continue;
@@ -97,14 +113,14 @@ export async function buildReport(model,source,{dailySheet='',graphSheet='',file
  const v=source.value,warnings=[];
  if(!source.ready)throw Error('선택한 주간 시트의 금주 금액이 미완성입니다. Excel에서 금액을 입력하고 저장하세요.');
  const rows=[];for(let r=6;r<=23;r++)rows.push({id:`account-${r}`,bank:String(v(`B${r}`)??''),type:String(v(`C${r}`)??''),account:accountMask(v(`D${r}`)),previous:number(v(`E${r}`)),in:number(v(`F${r}`)),out:number(v(`G${r}`)),current:number(v(`H${r}`)),note:r===19?`EUR ${rate(number(v('I19')))}`:r===20?`GBP ${rate(number(v('I20')))}`:String(v(`I${r}`)??''),currency:r===10||r===19?'EUR':r===20?'GBP':'KRW'});
- const transactions=await dailyTransactions(model,dailySheet,source);attachTransactions(rows,transactions,warnings);
- if(!transactions.length)warnings.push('보고기간에 해당하는 일일 거래내역이 없습니다. 일일 시트와 날짜를 확인하세요.');
+ const dailyLedger=await readDailyLedger(model,dailySheet,source),transactions=ledgerTransactions(dailyLedger);attachTransactions(rows,transactions,warnings);
+ if(dailySheet&&!dailyLedger.days.length)warnings.push('보고기간에 해당하는 일일내역 구간을 찾지 못했습니다. 일일 시트와 날짜를 확인하세요.');
  const stocks=[];for(let r=35;r<=38;r++)stocks.push({name:String(v(`B${r}`)??''),broker:String(v(`C${r}`)??''),quantity:num(v(`D${r}`)),price:num(v(`E${r}`)),previous:number(v(`F${r}`)),current:number(v(`G${r}`)),change:number(v(`H${r}`)),note:String(v(`I${r}`)??'')});
  const summary=[45,46,47,48].map((r,i)=>({key:categories[i],label:['현금','외화','주식','자산 총계'][i],previous:number(v(`E${r}`)),current:number(v(`F${r}`)),change:number(v(`G${r}`))}));
  const subtotal=[24,25,26,30,31].map(r=>({label:r===24?'원화 소계':r===25?'유로 소계':r===26?'파운드 소계':r===30?'외화 합계 (원화 환산)':'현금·외화 합계',previous:number(v(`E${r}`)),in:r<=26?number(v(`F${r}`)):null,out:r<=26?number(v(`G${r}`)):null,current:number(v(`H${r}`)),currency:r===25?'EUR':r===26?'GBP':'KRW',key:r===24?'cash':r===30?'foreign':r===31?'cashForeign':null}));
  const history=await graphHistory(model,graphSheet,source,summary,warnings);
  if(Math.abs(summary[0].current+summary[1].current+summary[2].current-summary[3].current)>1)throw Error('자금 총액비교 현황의 구성금액과 자산 총계가 일치하지 않습니다.');
- return {version:1,title:'주간 자금현황',company:'모비스',sheet:source.name,start:source.start,end:source.end,updatedAt:new Date().toISOString(),source:{weekly:source.name,daily:dailySheet,graph:graphSheet,fileName},rows,subtotal,stocks,stockTotal:{previous:number(v('F39')),current:number(v('G39')),change:number(v('H39'))},summary,history,warnings:[...new Set(warnings)],privacy:'계좌번호는 끝 4자리만 표시하며 개인 수취인 이름은 게시 데이터에서 제외합니다.'};
+ return {version:1,title:'주간 자금현황',company:'모비스',sheet:source.name,start:source.start,end:source.end,updatedAt:new Date().toISOString(),source:{weekly:source.name,daily:dailySheet,graph:graphSheet,fileName},rows,subtotal,stocks,stockTotal:{previous:number(v('F39')),current:number(v('G39')),change:number(v('H39'))},summary,history,dailyLedger,warnings:[...new Set(warnings)],privacy:'계좌번호는 끝 4자리만 표시합니다. 일일내역의 거래처와 내용은 원문대로 표시합니다.'};
 }
 export function validateReport(report){
  if(report?.version!==1||!Array.isArray(report.rows)||report.rows.length!==18||!Array.isArray(report.summary)||report.summary.length!==4||!Array.isArray(report.history))throw Error('게시 파일 형식이 올바르지 않습니다. 갱신 화면에서 다시 생성하세요.');

@@ -58,7 +58,7 @@ export async function readWorkbookSheet(model,name){
  const doc=parse(await model.read(pathFrom('xl/workbook.xml',rel.getAttribute('Target'))));
  const cells=new Map(all(doc,'c').map(c=>[c.getAttribute('r'),c]));
  const value=ref=>{const c=cells.get(ref);if(!c)return null;const t=c.getAttribute('t'),v=direct(c,'v');if(t==='s')return model.strings[Number(v?.textContent)];if(t==='inlineStr')return all(c,'t').map(t=>t.textContent).join('');if(t==='str'||t==='e')return v?.textContent??'';if(!v||v.textContent==='')return null;const n=Number(v.textContent);return Number.isFinite(n)?n:null;};
- return {name,cells,value};
+ return {name,cells,value,mergedRanges:all(doc,'mergeCell').map(c=>c.getAttribute('ref'))};
 }
 export async function generateWorkbook(model,source,inputs){
  if(!source.ready)throw Error(`선택한 시트의 금주 금액이 미완성입니다 (${source.missing.join(', ')}). Excel에서 금액을 입력하고 저장하거나 이전 완료 시트를 선택하세요.`);
